@@ -1,5 +1,16 @@
 {
-  "dependencies": {
-    "express-validator": "^7.3.1"
+  "name": "panapina",
+  "private": true,
+  "description": "Sistema de panadería PanaPina",
+  "scripts": {
+    "install:all": "npm install --prefix back-end && npm install --prefix front",
+    "dev": "concurrently -n back,front -c blue,green \"npm run dev --prefix back-end\" \"npm run dev --prefix front\"",
+    "dev:back": "npm run dev --prefix back-end",
+    "dev:front": "npm run dev --prefix front",
+    "start": "npm run start --prefix back-end",
+    "build": "npm run build --prefix front"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
   }
 }
