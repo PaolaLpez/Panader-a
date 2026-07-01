@@ -1,4 +1,4 @@
-const API_URL = 'http://localhost:5000/api';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5002/api';
 
 // Bandera global para verificar si estamos en modo offline
 let offlineMode = false;
@@ -764,6 +764,12 @@ export const api = {
       request(`/ventas/${id}`),
     cancel: (id, razon) => 
       request(`/ventas/${id}/cancelar`, { method: 'POST', body: { razon } }),
+  },
+
+  // Stripe
+  stripe: {
+    pay: (data) =>
+      request('/stripe/payment', { method: 'POST', body: data }),
   },
 
   // Turnos (Caja)

@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { loadStripe } from '@stripe/stripe-js';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 import { 
@@ -14,6 +15,8 @@ import {
   Lock,
   Compass
 } from 'lucide-react';
+
+const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLIC_KEY);
 
 export const POS = () => {
   const { turnoActivo } = useAuth();
@@ -37,14 +40,67 @@ export const POS = () => {
   const [showTicket, setShowTicket] = useState(false);
   const [ticketData, setTicketData] = useState(null);
 
+  // Modal de tarjeta
+  const [showCardModal, setShowCardModal] = useState(false);
+
   // Estados generales
   const [loading, setLoading] = useState(false);
   const [mensaje, setMensaje] = useState({ tipo: '', texto: '' });
+  const [cardHolderName, setCardHolderName] = useState('');
+  const [cardError, setCardError] = useState('');
+  const [cardReady, setCardReady] = useState(false);
+  const cardElementRef = useRef(null);
+  const stripeCardRef = useRef(null);
+  const stripeElementsRef = useRef(null);
 
   useEffect(() => {
     cargarProductos();
   }, []);
 
+  useEffect(() => {
+    if (metodoPago !== 'tarjeta') {
+      setCardError('');
+      setCardReady(false);
+      return;
+    }
+
+    const mountCardElement = async () => {
+      if (!cardElementRef.current || stripeCardRef.current) return;
+
+      const stripe = await stripePromise;
+      if (!stripe) {
+        setCardError('No se pudo cargar Stripe.');
+        return;
+      }
+
+      const elements = stripe.elements();
+      stripeElementsRef.current = elements;
+
+      const card = elements.create('card', {
+        hidePostalCode: true,
+        style: {
+          base: {
+            color: '#111827',
+            fontSize: '16px',
+            '::placeholder': { color: '#9ca3af' }
+          },
+          invalid: {
+            color: '#dc2626'
+          }
+        }
+      });
+
+      card.mount(cardElementRef.current);
+      card.on('change', (event) => {
+        setCardError(event.error ? event.error.message : '');
+        setCardReady(event.complete);
+      });
+
+      stripeCardRef.current = card;
+    };
+
+    mountCardElement();
+  }, [metodoPago]);
 
   const cargarProductos = async () => {
     setLoading(true);
@@ -183,6 +239,39 @@ export const POS = () => {
 
     setLoading(true);
     try {
+      if (metodoPago === 'tarjeta') {
+        if (!cardReady || !stripeCardRef.current) {
+          throw new Error('Por favor completa los datos de la tarjeta antes de pagar.');
+        }
+
+        const stripe = await stripePromise;
+        if (!stripe) {
+          throw new Error('No se pudo inicializar Stripe.');
+        }
+
+        const stripeResponse = await api.stripe.pay({ amount: total, currency: 'mxn' });
+        if (!stripeResponse.success || !stripeResponse.client_secret) {
+          throw new Error(stripeResponse.message || 'No se pudo procesar el pago con tarjeta.');
+        }
+
+        const result = await stripe.confirmCardPayment(stripeResponse.client_secret, {
+          payment_method: {
+            card: stripeCardRef.current,
+            billing_details: {
+              name: cardHolderName || 'Cliente PanaPina'
+            }
+          }
+        });
+
+        if (result.error) {
+          throw new Error(result.error.message || 'Error al confirmar pago con Stripe.');
+        }
+
+        if (result.paymentIntent?.status !== 'succeeded') {
+          throw new Error('El pago no se completó correctamente.');
+        }
+      }
+
       const ventaPayload = {
         total,
         pago_recibido: metodoPago === 'efectivo' ? recibido : total,
@@ -435,7 +524,10 @@ export const POS = () => {
                 <span>Efectivo</span>
               </button>
               <button
-                onClick={() => setMetodoPago('tarjeta')}
+                onClick={() => {
+                  setMetodoPago('tarjeta');
+                  setShowCardModal(true);
+                }}
                 style={{
                   ...styles.payMethodBtn,
                   ...(metodoPago === 'tarjeta' ? styles.payMethodBtnActive : {})
@@ -464,6 +556,44 @@ export const POS = () => {
                     <strong>${getCambio().toFixed(2)}</strong>
                   </div>
                 )}
+              </div>
+            )}
+
+            {metodoPago === 'tarjeta' && cart.length > 0 && (
+              <div style={{ marginTop: '12px' }}>
+                <div className="form-group" style={{ marginBottom: '8px' }}>
+                  <label className="form-label">Nombre en la tarjeta</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Nombre tal como aparece en la tarjeta"
+                    value={cardHolderName}
+                    onChange={(e) => setCardHolderName(e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '8px' }}>
+                  <label className="form-label">Datos de la tarjeta</label>
+                  <div
+                    ref={cardElementRef}
+                    style={{
+                      padding: '14px 12px',
+                      border: '1px solid var(--border)',
+                      borderRadius: '10px',
+                      backgroundColor: '#fff'
+                    }}
+                  ></div>
+                </div>
+
+                {cardError && (
+                  <div style={{ color: '#dc2626', fontSize: '13px', marginTop: '4px' }}>
+                    {cardError}
+                  </div>
+                )}
+
+                <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '8px' }}>
+                  Usa la tarjeta de prueba: <strong>4242 4242 4242 4242</strong>
+                </div>
               </div>
             )}
 
