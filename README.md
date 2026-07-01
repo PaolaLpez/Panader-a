@@ -428,28 +428,36 @@ Su objetivo es:
 
 ### API CHATBOT
 
-Icon de ChatBot
-<img src="![alt text](image-4.png)" width="100"/>
+**Icono del ChatBot**
 
-Pantalla de inicio
-<img src="![alt text](image-1.png)" width="100"/>
+<img src="Imagenes/image-4.png" width="100"/>
 
-Pregunta sugerida
-<img src="![alt text](image-2.png)" width="100"/>
+**Pantalla de inicio**
 
-Pregunta "¿Como va el inventario?"
-<img src="![alt text](image-3.png)" width="100"/>
+<img src="Imagenes/image-1.png" width="100"/>
+
+**Pregunta sugerida**
+
+<img src="Imagenes/image-2.png" width="100"/>
+
+**Pregunta "¿Cómo va el inventario?"**
+
+<img src="Imagenes/image-3.png" width="100"/>
 
 ### API STRIPE
 
-Inicio al seleccionar, "Tarjeta"
-<img src="![alt text](image-5.png)" width="100"/>
+**Inicio al seleccionar "Tarjeta"**
 
-Llenado de datos
-<img src="![alt text](image-6.png)" width="100"/>
+<img src="Imagenes/image-5.png" width="100"/>
 
-Muestra de error
-<img src="![alt text](image-7.png)" width="100"/>
+**Llenado de datos**
 
-Confirmación de pago
-<img src="![alt text](image-8.png)" width="100"/>
+<img src="Imagenes/image-6.png" width="100"/>
+
+**Muestra de error**
+
+<img src="Imagenes/image-7.png" width="100"/>
+
+**Confirmación de pago**
+
+<img src="Imagenes/image-8.png" width="100"/>
