@@ -10,6 +10,7 @@ const productosRoutes = require('./routes/productos.routes');
 const ventasRoutes = require('./routes/ventas.routes');
 const turnosRoutes = require('./routes/turnos.routes');
 const reportesRoutes = require('./routes/reportes.routes');
+const stripeRoutes = require('./routes/stripe.routes');
 
 // Cargar variables de entorno
 dotenv.config();
@@ -106,6 +107,9 @@ app.use('/api/turnos', turnosRoutes);
 
 // Reportes
 app.use('/api/reportes', reportesRoutes);
+
+// Stripe
+app.use('/api/stripe', stripeRoutes);
 
 // Ruta no encontrada
 app.use((req, res) => {

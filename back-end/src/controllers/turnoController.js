@@ -1,5 +1,5 @@
-const Turno = require('../models/Turno');
-const db = require('../config/database');
+const Turno = require("../models/Turno");
+const db = require("../config/database");
 
 class TurnoController {
   // Iniciar turno
@@ -9,40 +9,43 @@ class TurnoController {
       const empleado_id = req.user.id;
 
       // Validar tipo de turno
-      if (!['mañana', 'noche'].includes(tipo_turno)) {
+      if (!["mañana", "noche"].includes(tipo_turno)) {
         return res.status(400).json({
           success: false,
-          message: 'Tipo de turno inválido. Use "mañana" o "noche"'
+          message: 'Tipo de turno inválido. Use "mañana" o "noche"',
         });
       }
 
       // Verificar horario según tipo de turno
       const ahora = new Date();
       const hora = ahora.getHours();
-      
-      if (tipo_turno === 'mañana' && (hora < 7 || hora >= 11)) {
+
+      if (tipo_turno === "mañana" && (hora < 7 || hora >= 11)) {
         return res.status(400).json({
           success: false,
-          message: 'El turno de mañana es de 7:00 AM a 11:00 AM'
+          message: "El turno de mañana es de 7:00 AM a 11:00 AM",
         });
       }
 
-      if (tipo_turno === 'noche' && (hora < 18 || hora >= 22)) {
+      if (tipo_turno === "noche" && !(hora >= 18 || hora < 10)) {
         return res.status(400).json({
           success: false,
-          message: 'El turno de noche es de 6:00 PM a 10:00 PM'
+          message: "El turno de noche es de 6:00 PM a 2:00 AM",
         });
       }
 
       // Verificar si ya tiene un turno activo hoy
-      const fechaHoy = ahora.toISOString().split('T')[0];
-      const turnoActivo = await Turno.findActivoByEmpleado(empleado_id, fechaHoy);
+      const fechaHoy = ahora.toISOString().split("T")[0];
+      const turnoActivo = await Turno.findActivoByEmpleado(
+        empleado_id,
+        fechaHoy,
+      );
 
       if (turnoActivo) {
         return res.status(400).json({
           success: false,
-          message: 'Ya tienes un turno activo hoy',
-          data: turnoActivo
+          message: "Ya tienes un turno activo hoy",
+          data: turnoActivo,
         });
       }
 
@@ -51,23 +54,22 @@ class TurnoController {
         empleado_id,
         fecha: fechaHoy,
         tipo_turno,
-        hora_inicio: ahora.toTimeString().split(' ')[0],
-        efectivo_inicial: efectivo_inicial || 0
+        hora_inicio: ahora.toTimeString().split(" ")[0],
+        efectivo_inicial: efectivo_inicial || 0,
       };
 
       const turno = await Turno.create(turnoData);
 
       res.status(201).json({
         success: true,
-        message: 'Turno iniciado exitosamente',
-        data: turno
+        message: "Turno iniciado exitosamente",
+        data: turno,
       });
-
     } catch (error) {
       res.status(500).json({
         success: false,
-        message: 'Error al iniciar turno',
-        error: error.message
+        message: "Error al iniciar turno",
+        error: error.message,
       });
     }
   }
@@ -80,21 +82,21 @@ class TurnoController {
 
       // Verificar que el turno pertenece al empleado
       const turnoResult = await db.query(
-        'SELECT * FROM turnos WHERE id = $1 AND empleado_id = $2',
-        [id, req.user.id]
+        "SELECT * FROM turnos WHERE id = $1 AND empleado_id = $2",
+        [id, req.user.id],
       );
 
       if (turnoResult.rowCount === 0) {
         return res.status(404).json({
           success: false,
-          message: 'Turno no encontrado o no te pertenece'
+          message: "Turno no encontrado o no te pertenece",
         });
       }
 
-      if (turnoResult.rows[0].estado === 'cerrado') {
+      if (turnoResult.rows[0].estado === "cerrado") {
         return res.status(400).json({
           success: false,
-          message: 'El turno ya está cerrado'
+          message: "El turno ya está cerrado",
         });
       }
 
@@ -106,18 +108,17 @@ class TurnoController {
 
       res.json({
         success: true,
-        message: 'Turno cerrado exitosamente',
+        message: "Turno cerrado exitosamente",
         data: {
           turno,
-          cierre_caja: cierreCaja
-        }
+          cierre_caja: cierreCaja,
+        },
       });
-
     } catch (error) {
       res.status(500).json({
         success: false,
-        message: 'Error al cerrar turno',
-        error: error.message
+        message: "Error al cerrar turno",
+        error: error.message,
       });
     }
   }
@@ -125,25 +126,25 @@ class TurnoController {
   // Obtener turno activo
   static async getActivo(req, res) {
     try {
-      const fechaHoy = new Date().toISOString().split('T')[0];
+      const fechaHoy = new Date().toISOString().split("T")[0];
       const turno = await Turno.findActivoByEmpleado(req.user.id, fechaHoy);
 
       if (!turno) {
         return res.status(404).json({
           success: false,
-          message: 'No tienes un turno activo hoy'
+          message: "No tienes un turno activo hoy",
         });
       }
 
       res.json({
         success: true,
-        data: turno
+        data: turno,
       });
     } catch (error) {
       res.status(500).json({
         success: false,
-        message: 'Error al obtener turno activo',
-        error: error.message
+        message: "Error al obtener turno activo",
+        error: error.message,
       });
     }
   }
@@ -153,7 +154,8 @@ class TurnoController {
     try {
       const { fecha, page = 1, limit = 20 } = req.query;
       const offset = (page - 1) * limit;
-      const empleado_id = req.user.rol === 'admin' ? req.query.empleado_id : req.user.id;
+      const empleado_id =
+        req.user.rol === "admin" ? req.query.empleado_id : req.user.id;
 
       let query = `
         SELECT t.*, e.nombre_completo as empleado_nombre,
@@ -182,20 +184,20 @@ class TurnoController {
       query += ` GROUP BY t.id, e.nombre_completo
                  ORDER BY t.fecha DESC, t.hora_inicio DESC
                  LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
-      
+
       params.push(limit, offset);
 
       const result = await db.query(query, params);
 
       res.json({
         success: true,
-        data: result.rows
+        data: result.rows,
       });
     } catch (error) {
       res.status(500).json({
         success: false,
-        message: 'Error al obtener historial de turnos',
-        error: error.message
+        message: "Error al obtener historial de turnos",
+        error: error.message,
       });
     }
   }
@@ -210,13 +212,13 @@ class TurnoController {
       // Verificar que el turno está activo
       const turnoResult = await db.query(
         'SELECT * FROM turnos WHERE id = $1 AND estado = "abierto"',
-        [turno_id]
+        [turno_id],
       );
 
       if (turnoResult.rowCount === 0) {
         return res.status(400).json({
           success: false,
-          message: 'El turno no está activo o no existe'
+          message: "El turno no está activo o no existe",
         });
       }
 
@@ -225,20 +227,19 @@ class TurnoController {
         `INSERT INTO retiros_caja (turno_id, monto, tipo, motivo, descripcion, autorizado_por)
          VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING *`,
-        [turno_id, monto, tipo, motivo, descripcion, autorizado_por]
+        [turno_id, monto, tipo, motivo, descripcion, autorizado_por],
       );
 
       res.status(201).json({
         success: true,
-        message: 'Retiro registrado exitosamente',
-        data: result.rows[0]
+        message: "Retiro registrado exitosamente",
+        data: result.rows[0],
       });
-
     } catch (error) {
       res.status(500).json({
         success: false,
-        message: 'Error al registrar retiro',
-        error: error.message
+        message: "Error al registrar retiro",
+        error: error.message,
       });
     }
   }
