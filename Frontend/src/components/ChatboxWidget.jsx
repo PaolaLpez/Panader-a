@@ -25,6 +25,33 @@ export const ChatboxWidget = () => {
     scrollToBottom();
   }, [messages, isTyping]);
 
+  useEffect(() => {
+    const styleId = 'pinabot-custom-styles';
+    if (!document.getElementById(styleId)) {
+      const sheet = document.createElement('style');
+      sheet.id = styleId;
+      sheet.innerHTML = `
+        @keyframes floatUp {
+          from { transform: translateY(30px); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
+        }
+        @keyframes pulseGlow {
+          0% { box-shadow: 0 0 0 0 rgba(180, 83, 9, 0.4); }
+          70% { box-shadow: 0 0 0 10px rgba(180, 83, 9, 0); }
+          100% { box-shadow: 0 0 0 0 rgba(180, 83, 9, 0); }
+        }
+        .pinabot-btn {
+          animation: pulseGlow 2s infinite;
+          transition: all 0.2s ease-in-out;
+        }
+        .pinabot-btn:hover {
+          transform: scale(1.08) rotate(-5deg);
+        }
+      `;
+      document.head.appendChild(sheet);
+    }
+  }, []);
+
   const handleSendMessage = async (textToSend) => {
     const text = textToSend || inputValue;
     if (!text.trim()) return;
@@ -93,6 +120,7 @@ export const ChatboxWidget = () => {
     <>
       {/* Botón flotante para abrir el chat */}
       <button 
+        className="pinabot-btn"
         style={{
           position: 'fixed',
           bottom: '24px',
@@ -107,8 +135,7 @@ export const ChatboxWidget = () => {
           border: 'none',
           boxShadow: '0 8px 24px rgba(180, 83, 9, 0.4)',
           cursor: 'pointer',
-          zIndex: 9999,
-          transition: 'all 0.2s ease'
+          zIndex: 9999
         }}
         onClick={() => setIsOpen(true)}
         title="PinaBot - Asistente Virtual"
@@ -133,10 +160,11 @@ export const ChatboxWidget = () => {
       {isOpen && (
         <div style={{
           position: 'fixed',
-          bottom: '96px',
+          bottom: '24px',
           right: '24px',
-          width: '360px',
-          height: '520px',
+          width: '370px',
+          height: '500px',
+          maxHeight: 'calc(100vh - 48px)',
           borderRadius: '16px',
           backgroundColor: 'var(--card-bg)',
           border: '1px solid var(--border)',
@@ -144,7 +172,8 @@ export const ChatboxWidget = () => {
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
-          zIndex: 9999
+          zIndex: 9999,
+          animation: 'floatUp 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
         }}>
           {/* Cabecera del Chat */}
           <div style={{
@@ -155,29 +184,53 @@ export const ChatboxWidget = () => {
             gap: '12px',
             borderBottom: '1px solid var(--border)'
           }}>
+            {/* Logo de avatar de la panadería */}
             <div style={{
               width: '36px',
               height: '36px',
               borderRadius: '50%',
-              backgroundColor: 'var(--primary)',
+              overflow: 'hidden',
+              backgroundColor: '#fff',
+              border: '2px solid rgba(255,255,255,0.2)',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+              justifyContent: 'center'
             }}>
-              <Sparkles size={16} color="#fff" />
+              <img src="/logo_panapina.png" alt="PinaBot Avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             </div>
+            
             <div style={{
               display: 'flex',
               flexDirection: 'column',
               textAlign: 'left',
               flex: 1
             }}>
-              <span style={{ color: '#fff', fontWeight: '700', fontSize: '14px' }}>PinaBot 🤖</span>
+              <span style={{ color: '#fff', fontWeight: '750', fontSize: '14px', letterSpacing: '0.3px' }}>PinaBot 🤖</span>
               <span style={{ color: '#4ade80', fontSize: '11px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '4px' }}><span style={{ fontSize: '8px' }}>●</span> En línea</span>
             </div>
-            <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }} onClick={() => setIsOpen(false)}>
-              <X size={18} color="var(--text-muted)" />
+            
+            {/* Botón Circular de Cerrar Pestaña */}
+            <button 
+              onClick={() => setIsOpen(false)}
+              style={{
+                background: 'rgba(255, 255, 255, 0.15)',
+                border: 'none',
+                borderRadius: '50%',
+                width: '30px',
+                height: '30px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                transition: 'background-color 0.2s ease',
+                color: '#fff'
+              }}
+              title="Cerrar chat"
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.3)'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.15)'}
+            >
+              <X size={16} color="#fff" />
             </button>
           </div>
 
@@ -195,17 +248,38 @@ export const ChatboxWidget = () => {
                   style={{
                     display: 'flex',
                     width: '100%',
-                    justifyContent: msg.sender === 'user' ? 'flex-end' : 'flex-start'
+                    justifyContent: msg.sender === 'user' ? 'flex-end' : 'flex-start',
+                    alignItems: 'flex-end',
+                    gap: '8px'
                   }}
                 >
+                  {/* Mini-Avatar de PinaBot al lado de sus mensajes */}
+                  {msg.sender === 'bot' && (
+                    <div style={{
+                      width: '26px',
+                      height: '26px',
+                      borderRadius: '50%',
+                      overflow: 'hidden',
+                      backgroundColor: '#fff',
+                      border: '1px solid var(--border)',
+                      flexShrink: 0,
+                      marginBottom: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}>
+                      <img src="/logo_panapina.png" alt="PinaBot" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    </div>
+                  )}
+
                   <div 
                     style={{
-                      maxWidth: '80%',
+                      maxWidth: '75%',
                       padding: '10px 14px',
                       borderRadius: '12px',
                       fontSize: '13px',
                       textAlign: 'left',
-                      boxShadow: '0 2px 4px rgba(0,0,0,0.03)',
+                      boxShadow: '0 2px 5px rgba(0,0,0,0.03)',
                       ...(msg.sender === 'user' ? {
                         backgroundColor: 'var(--primary-light)',
                         color: 'var(--primary-hover)',

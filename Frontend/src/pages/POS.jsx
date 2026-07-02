@@ -30,6 +30,7 @@ export const POS = () => {
   // Categoría seleccionada en la vista
   const [activeCategory, setActiveCategory] = useState('todos');
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeTab, setActiveTab] = useState('catalog'); // 'catalog' o 'cart'
   
   // Carrito de compras
   const [cart, setCart] = useState([]);
@@ -42,6 +43,22 @@ export const POS = () => {
 
   // Modal de tarjeta
   const [showCardModal, setShowCardModal] = useState(false);
+
+  // Estados de Facturación
+  const [currentVentaId, setCurrentVentaId] = useState(null);
+  const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  const [showInvoiceSuccess, setShowInvoiceSuccess] = useState(false);
+  const [invoiceLoading, setInvoiceLoading] = useState(false);
+  const [invoiceError, setInvoiceError] = useState('');
+  const [invoiceData, setInvoiceData] = useState(null);
+  const [invoiceForm, setInvoiceForm] = useState({
+    rfc: '',
+    nombre: '',
+    codigo_postal: '',
+    regimen_fiscal: '601',
+    uso_cfdi: 'G03',
+    email: ''
+  });
 
   // Estados generales
   const [loading, setLoading] = useState(false);
@@ -58,12 +75,49 @@ export const POS = () => {
   }, []);
 
   useEffect(() => {
-    if (metodoPago !== 'tarjeta') {
-      setCardError('');
-      setCardReady(false);
-      return;
+    const styleId = 'pos-custom-styles';
+    if (!document.getElementById(styleId)) {
+      const sheet = document.createElement('style');
+      sheet.id = styleId;
+      sheet.innerHTML = `
+        .pos-product-card {
+          background-color: var(--card-bg);
+          border: 1px solid var(--border);
+          border-radius: 12px;
+          padding: 12px;
+          cursor: pointer;
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          box-shadow: 0 4px 10px rgba(0, 0, 0, 0.02);
+          transition: all 0.2s ease-in-out;
+        }
+        .pos-product-card:hover {
+          transform: translateY(-3px);
+          box-shadow: 0 8px 20px rgba(180, 83, 9, 0.1);
+          border-color: var(--primary);
+        }
+        .pos-cart-item {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          padding: 12px;
+          background-color: var(--card-bg);
+          border-radius: 10px;
+          border: 1px solid var(--border);
+          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
+          transition: all 0.15s ease-in-out;
+        }
+        .pos-cart-item:hover {
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+          border-color: var(--primary-light);
+        }
+      `;
+      document.head.appendChild(sheet);
     }
+  }, []);
 
+  useEffect(() => {
     const mountCardElement = async () => {
       if (!cardElementRef.current || stripeCardRef.current) return;
 
@@ -100,7 +154,7 @@ export const POS = () => {
     };
 
     mountCardElement();
-  }, [metodoPago]);
+  }, []);
 
   const cargarProductos = async () => {
     setLoading(true);
@@ -240,35 +294,41 @@ export const POS = () => {
     setLoading(true);
     try {
       if (metodoPago === 'tarjeta') {
-        if (!cardReady || !stripeCardRef.current) {
-          throw new Error('Por favor completa los datos de la tarjeta antes de pagar.');
-        }
-
-        const stripe = await stripePromise;
-        if (!stripe) {
-          throw new Error('No se pudo inicializar Stripe.');
-        }
-
-        const stripeResponse = await api.stripe.pay({ amount: total, currency: 'mxn' });
-        if (!stripeResponse.success || !stripeResponse.client_secret) {
-          throw new Error(stripeResponse.message || 'No se pudo procesar el pago con tarjeta.');
-        }
-
-        const result = await stripe.confirmCardPayment(stripeResponse.client_secret, {
-          payment_method: {
-            card: stripeCardRef.current,
-            billing_details: {
-              name: cardHolderName || 'Cliente PanaPina'
-            }
+        // Si estamos en modo offline/simulado, saltarnos la llamada real a Stripe
+        if (window.isPanapinaOffline) {
+          console.log('[POS Offline] Simulando confirmación de pago con tarjeta...');
+          await new Promise(r => setTimeout(r, 1000));
+        } else {
+          if (!cardReady || !stripeCardRef.current) {
+            throw new Error('Por favor completa los datos de la tarjeta antes de pagar.');
           }
-        });
 
-        if (result.error) {
-          throw new Error(result.error.message || 'Error al confirmar pago con Stripe.');
-        }
+          const stripe = await stripePromise;
+          if (!stripe) {
+            throw new Error('No se pudo inicializar Stripe.');
+          }
 
-        if (result.paymentIntent?.status !== 'succeeded') {
-          throw new Error('El pago no se completó correctamente.');
+          const stripeResponse = await api.stripe.pay({ amount: total, currency: 'mxn' });
+          if (!stripeResponse.success || !stripeResponse.client_secret) {
+            throw new Error(stripeResponse.message || 'No se pudo procesar el pago con tarjeta.');
+          }
+
+          const result = await stripe.confirmCardPayment(stripeResponse.client_secret, {
+            payment_method: {
+              card: stripeCardRef.current,
+              billing_details: {
+                name: cardHolderName || 'Cliente PanaPina'
+              }
+            }
+          });
+
+          if (result.error) {
+            throw new Error(result.error.message || 'Error al confirmar pago con Stripe.');
+          }
+
+          if (result.paymentIntent?.status !== 'succeeded') {
+            throw new Error('El pago no se completó correctamente.');
+          }
         }
       }
 
@@ -285,12 +345,15 @@ export const POS = () => {
 
       const res = await api.ventas.create(ventaPayload);
       if (res.success) {
+        setCurrentVentaId(res.data?.venta?.id || Math.floor(Math.random() * 1000) + 1);
         setTicketData(res.data.ticket);
         setShowTicket(true);
         setCart([]);
         setPagoRecibido('');
         // Recargar productos
         cargarProductos();
+        setShowCardModal(false);
+        setActiveTab('catalog');
       }
     } catch (err) {
       console.error('Error al realizar checkout:', err);
@@ -298,6 +361,54 @@ export const POS = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Generar Factura CFDI 4.0
+  const handleGenerarFactura = async (e) => {
+    if (e) e.preventDefault();
+    if (!invoiceForm.rfc || !invoiceForm.nombre || !invoiceForm.codigo_postal) {
+      setInvoiceError('Por favor, completa todos los campos requeridos.');
+      return;
+    }
+
+    const rfcRegex = /^[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}$/i;
+    if (!rfcRegex.test(invoiceForm.rfc)) {
+      setInvoiceError('El formato de RFC no es válido.');
+      return;
+    }
+
+    if (invoiceForm.codigo_postal.length !== 5) {
+      setInvoiceError('El código postal debe ser de 5 dígitos.');
+      return;
+    }
+
+    setInvoiceLoading(true);
+    setInvoiceError('');
+
+    try {
+      const res = await api.ventas.facturar(currentVentaId, invoiceForm);
+      if (res.success) {
+        setInvoiceData(res.data);
+        setShowInvoiceModal(false);
+        setShowInvoiceSuccess(true);
+      } else {
+        throw new Error(res.message || 'Error al generar la factura.');
+      }
+    } catch (err) {
+      console.error('Error al facturar:', err);
+      setInvoiceError(err.message || 'Ocurrió un error al procesar la factura con Facturama.');
+    } finally {
+      setInvoiceLoading(false);
+    }
+  };
+
+  // Función para descargar archivos base64 en el cliente
+  const descargarArchivoFactura = (base64Data, fileName, contentType) => {
+    const linkSource = `data:${contentType};base64,${base64Data}`;
+    const downloadLink = document.createElement("a");
+    downloadLink.href = linkSource;
+    downloadLink.download = fileName;
+    downloadLink.click();
   };
 
   return (
@@ -329,285 +440,478 @@ export const POS = () => {
       )}
 
       <div style={styles.mainLayout}>
-        {/* COLUMNA IZQUIERDA: PRODUCTOS Y FILTROS */}
-        <div style={styles.catalogoColumn}>
-          {/* BARRA BUSCADOR Y FILTROS */}
-          <div style={styles.filterBar}>
-            <div style={styles.searchWrapper}>
-              <Search size={18} style={styles.searchIcon} />
-              <input
-                type="text"
-                placeholder="Buscar pan dulce, bolillos, refrescos..."
-                className="form-input"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                style={{ paddingLeft: '44px' }}
-              />
-            </div>
-            
-            <div style={styles.tabContainer}>
-              <button 
-                onClick={() => setActiveCategory('todos')}
-                style={{
-                  ...styles.tabBtn,
-                  ...(activeCategory === 'todos' ? styles.tabBtnActive : {})
-                }}
-              >
-                Todos
-              </button>
-              <button 
-                onClick={() => setActiveCategory('pan')}
-                style={{
-                  ...styles.tabBtn,
-                  ...(activeCategory === 'pan' ? styles.tabBtnActive : {})
-                }}
-              >
-                Panadería
-              </button>
-              <button 
-                onClick={() => setActiveCategory('refri')}
-                style={{
-                  ...styles.tabBtn,
-                  ...(activeCategory === 'refri' ? styles.tabBtnActive : {})
-                }}
-              >
-                Refrigerador
-              </button>
-              <button 
-                onClick={() => setActiveCategory('tienda')}
-                style={{
-                  ...styles.tabBtn,
-                  ...(activeCategory === 'tienda' ? styles.tabBtnActive : {})
-                }}
-              >
-                Tienda / Abarrotes
-              </button>
-            </div>
-          </div>
-
-          {/* GRID DE PRODUCTOS */}
-          <div style={styles.productsGrid}>
-            {getFilteredProducts().map((product) => {
-              const stock = product.tipo === 'pan' ? product.stock_actual : 99; // refri/tienda ilimitados
-              const isOut = stock <= 0;
-              const isLow = product.tipo === 'pan' && stock <= product.stock_minimo;
+        {activeTab === 'catalog' ? (
+          /* COLUMNA IZQUIERDA COMPLETA EN 100% ANCHO */
+          <div style={{ ...styles.catalogoColumn, width: '100%', flex: 1 }}>
+            {/* BARRA BUSCADOR Y FILTROS */}
+            <div style={styles.filterBar}>
+              <div style={styles.searchWrapper}>
+                <Search size={18} style={styles.searchIcon} />
+                <input
+                  type="text"
+                  placeholder="Buscar pan dulce, bolillos, refrescos..."
+                  className="form-input"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{ paddingLeft: '44px' }}
+                />
+              </div>
               
-              return (
-                <div 
-                  key={`${product.tipo}-${product.id}`}
-                  onClick={() => !isOut && addToCart(product)}
-                  className="card card-hoverable"
+              <div style={styles.tabContainer}>
+                <button 
+                  onClick={() => setActiveCategory('todos')}
                   style={{
-                    ...styles.productCard,
-                    ...(isOut ? styles.productCardDisabled : {})
+                    ...styles.tabBtn,
+                    ...(activeCategory === 'todos' ? styles.tabBtnActive : {})
                   }}
                 >
-                  {product.imagen_url ? (
-                    <img src={product.imagen_url} alt={product.nombre} style={styles.productImg} />
-                  ) : (
-                    <div style={styles.productPlaceholder}>
-                      <span>🍞</span>
+                  Todos
+                </button>
+                <button 
+                  onClick={() => setActiveCategory('pan')}
+                  style={{
+                    ...styles.tabBtn,
+                    ...(activeCategory === 'pan' ? styles.tabBtnActive : {})
+                  }}
+                >
+                  Panadería
+                </button>
+                <button 
+                  onClick={() => setActiveCategory('refri')}
+                  style={{
+                    ...styles.tabBtn,
+                    ...(activeCategory === 'refri' ? styles.tabBtnActive : {})
+                  }}
+                >
+                  Refrigerador
+                </button>
+                <button 
+                  onClick={() => setActiveCategory('tienda')}
+                  style={{
+                    ...styles.tabBtn,
+                    ...(activeCategory === 'tienda' ? styles.tabBtnActive : {})
+                  }}
+                >
+                  Tienda / Abarrotes
+                </button>
+              </div>
+
+              {/* Botón flotante para ver Carrito */}
+              <button 
+                onClick={() => setActiveTab('cart')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '10px 18px',
+                  backgroundColor: cart.length > 0 ? 'var(--primary)' : '#9ca3af',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '12px',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  boxShadow: cart.length > 0 ? '0 4px 14px rgba(180, 83, 9, 0.35)' : 'none',
+                  transition: 'all 0.2s ease',
+                  marginLeft: '12px',
+                  height: '42px',
+                  alignSelf: 'center',
+                  flexShrink: 0
+                }}
+              >
+                <ShoppingCart size={18} />
+                <span>Ver Carrito</span>
+                <span style={{
+                  backgroundColor: '#fff',
+                  color: cart.length > 0 ? 'var(--primary)' : '#6b7280',
+                  padding: '2px 8px',
+                  borderRadius: '20px',
+                  fontSize: '11px',
+                  fontWeight: '800',
+                  marginLeft: '4px'
+                }}>
+                  {cart.reduce((sum, i) => sum + i.cantidad, 0)}
+                </span>
+              </button>
+            </div>
+
+            {/* GRID DE PRODUCTOS */}
+            <div style={styles.productsGrid}>
+              {getFilteredProducts().map((product) => {
+                const stock = product.tipo === 'pan' ? product.stock_actual : 99; // refri/tienda ilimitados
+                const isOut = stock <= 0;
+                const isLow = product.tipo === 'pan' && stock <= product.stock_minimo;
+                
+                // Estilo de badge del stock
+                const getStockBadgeStyle = () => {
+                  if (isOut) {
+                    return {
+                      padding: '3px 8px',
+                      borderRadius: '20px',
+                      backgroundColor: '#fee2e2',
+                      color: '#ef4444',
+                      fontSize: '10px',
+                      fontWeight: '700'
+                    };
+                  }
+                  if (isLow) {
+                    return {
+                      padding: '3px 8px',
+                      borderRadius: '20px',
+                      backgroundColor: '#fef3c7',
+                      color: '#d97706',
+                      fontSize: '10px',
+                      fontWeight: '700'
+                    };
+                  }
+                  return {
+                    padding: '3px 8px',
+                    borderRadius: '20px',
+                    backgroundColor: '#f3f4f6',
+                    color: '#4b5563',
+                    fontSize: '10px',
+                    fontWeight: '750'
+                  };
+                };
+
+                return (
+                  <div 
+                    key={`${product.tipo}-${product.id}`}
+                    onClick={() => {
+                      if (!isOut) {
+                        addToCart(product);
+                      }
+                    }}
+                    className="pos-product-card"
+                    style={isOut ? styles.productCardDisabled : {}}
+                  >
+                    {product.imagen_url ? (
+                      <img src={product.imagen_url} alt={product.nombre} style={styles.productImg} />
+                    ) : (
+                      <div style={styles.productPlaceholder}>
+                        <span style={{ fontSize: '28px' }}>{product.tipo === 'pan' ? '🍞' : product.tipo === 'refri' ? '🥤' : '📦'}</span>
+                        <span style={{ fontSize: '9px', fontWeight: '800', color: '#b45309', opacity: 0.8, textTransform: 'uppercase' }}>Sin imagen</span>
+                      </div>
+                    )}
+                    
+                    <div style={styles.productInfo}>
+                      <span style={{
+                        fontSize: '9px',
+                        fontWeight: '800',
+                        color: product.tipo === 'pan' ? '#b45309' : product.tipo === 'refri' ? '#0891b2' : '#059669',
+                        backgroundColor: product.tipo === 'pan' ? '#fef3c7' : product.tipo === 'refri' ? '#ecfeff' : '#e6f4ea',
+                        padding: '3px 8px',
+                        borderRadius: '6px',
+                        alignSelf: 'flex-start',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.5px',
+                        marginBottom: '4px'
+                      }}>
+                        {product.categoria_display}
+                      </span>
+                      <h3 style={styles.productName}>{product.nombre}</h3>
+                      <div style={styles.productBottom}>
+                        <span style={styles.productPrice}>${parseFloat(product.precio).toFixed(2)}</span>
+                        
+                        {product.tipo === 'pan' && (
+                          <span style={getStockBadgeStyle()}>
+                            {isOut ? 'Agotado' : `Stock: ${stock}`}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {getFilteredProducts().length === 0 && (
+                <div style={styles.emptyCatalog}>
+                  <Compass size={40} color="var(--text-muted)" />
+                  <p>No se encontraron productos coincidentes en el catálogo.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          /* PANTALLA EXCLUSIVA DEL CARRITO Y COBRO (Doble columna espaciosa) */
+          <div style={{ display: 'flex', width: '100%', gap: '24px', animation: 'floatUp 0.3s ease', flex: 1, overflow: 'hidden', height: '100%' }}>
+            {/* Columna Izquierda: Detalle de productos en el carrito */}
+            <div style={{ flex: 1.4, display: 'flex', flexDirection: 'column', backgroundColor: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border)', padding: '24px', boxShadow: 'var(--shadow-sm)', height: '100%', overflow: 'hidden' }}>
+              
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', borderBottom: '1px solid var(--border)', paddingBottom: '16px' }}>
+                <button 
+                  onClick={() => setActiveTab('catalog')}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--primary)',
+                    fontWeight: '700',
+                    fontSize: '14px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  ← Volver al Catálogo
+                </button>
+                <h2 style={{ fontSize: '20px', color: 'var(--secondary)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <ShoppingCart size={22} color="var(--primary)" />
+                  Detalle del Carrito
+                </h2>
+              </div>
+
+              {/* Lista de productos en el carrito */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', overflowY: 'auto', flex: 1, paddingRight: '4px' }}>
+                {cart.length === 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '12px', height: '100%', minHeight: '200px', color: 'var(--text-muted)' }}>
+                    <span style={{ fontSize: '36px' }}>🍞</span>
+                    <p style={{ margin: 0, fontWeight: '600' }}>El carrito está vacío</p>
+                    <button onClick={() => setActiveTab('catalog')} className="btn btn-primary" style={{ padding: '8px 16px', fontSize: '13px' }}>Ir al Catálogo</button>
+                  </div>
+                ) : (
+                  cart.map((item) => (
+                    <div 
+                      key={`${item.tipo}-${item.id}`} 
+                      className="pos-cart-item" 
+                      style={{ 
+                        borderLeft: item.tipo === 'pan' ? '4px solid var(--primary)' : item.tipo === 'refri' ? '4px solid #0891b2' : '4px solid #059669',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px',
+                        padding: '12px'
+                      }}
+                    >
+                      {/* Fila 1: Imagen, Nombre y Eliminar */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%' }}>
+                        <div style={{
+                          width: '32px',
+                          height: '32px',
+                          borderRadius: '6px',
+                          backgroundColor: 'var(--background)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          overflow: 'hidden',
+                          border: '1px solid var(--border)',
+                          flexShrink: 0
+                        }}>
+                          {item.imagen_url ? (
+                            <img src={item.imagen_url} alt={item.nombre} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            <span style={{ fontSize: '14px' }}>{item.tipo === 'pan' ? '🍞' : item.tipo === 'refri' ? '🥤' : '📦'}</span>
+                          )}
+                        </div>
+                        
+                        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+                          <span style={{
+                            fontSize: '14px',
+                            fontWeight: '700',
+                            color: 'var(--secondary)',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            textAlign: 'left'
+                          }} title={item.nombre}>
+                            {item.nombre}
+                          </span>
+                          <span style={{
+                            fontSize: '11px',
+                            color: 'var(--text-muted)',
+                            fontWeight: '500',
+                            textAlign: 'left'
+                          }}>
+                            {item.categoria_display}
+                          </span>
+                        </div>
+
+                        <button 
+                          onClick={() => deleteFromCart(item.id, item.tipo)}
+                          style={{
+                            border: 'none',
+                            background: 'none',
+                            color: 'var(--danger)',
+                            cursor: 'pointer',
+                            padding: '4px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            opacity: 0.8,
+                            transition: 'opacity 0.1s ease'
+                          }}
+                          type="button"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+
+                      {/* Fila 2: Precio unitario, Controles de cantidad y Subtotal */}
+                      <div style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        justifyContent: 'space-between', 
+                        width: '100%', 
+                        borderTop: '1px dashed var(--border)', 
+                        paddingTop: '8px', 
+                        marginTop: '2px' 
+                      }}>
+                        <span style={{
+                          fontSize: '12px',
+                          fontWeight: '600',
+                          color: 'var(--text-muted)'
+                        }}>
+                          ${parseFloat(item.precio).toFixed(2)} c/u
+                        </span>
+
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          backgroundColor: 'var(--background)',
+                          padding: '4px 8px',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border)'
+                        }}>
+                          <button 
+                            onClick={() => removeFromCart(item)}
+                            style={{
+                              width: '20px',
+                              height: '20px',
+                              borderRadius: '4px',
+                              border: 'none',
+                              backgroundColor: 'var(--card-bg)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                              color: 'var(--text-main)',
+                              boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                            }}
+                            type="button"
+                          >
+                            <Minus size={10} />
+                          </button>
+                          <span style={{
+                            fontSize: '12px',
+                            fontWeight: '700',
+                            minWidth: '14px',
+                            textAlign: 'center',
+                            color: 'var(--secondary)'
+                          }}>{item.cantidad}</span>
+                          <button 
+                            onClick={() => addToCart(item)}
+                            style={{
+                              width: '20px',
+                              height: '20px',
+                              borderRadius: '4px',
+                              border: 'none',
+                              backgroundColor: 'var(--card-bg)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                              color: 'var(--text-main)',
+                              boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                            }}
+                            type="button"
+                          >
+                            <Plus size={10} />
+                          </button>
+                        </div>
+
+                        <span style={{
+                          fontSize: '14px',
+                          fontWeight: '800',
+                          color: 'var(--primary)',
+                          textAlign: 'right'
+                        }}>
+                          ${(parseFloat(item.precio) * item.cantidad).toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Columna Derecha: Cobro */}
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border)', padding: '24px', boxShadow: 'var(--shadow-sm)', height: '100%', overflowY: 'auto' }}>
+              <h2 style={{ fontSize: '18px', color: 'var(--secondary)', margin: '0 0 20px 0', borderBottom: '1px solid var(--border)', paddingBottom: '16px', textAlign: 'left' }}>Resumen del Cobro</h2>
+              
+              <div style={styles.totalRow}>
+                <span>Subtotal:</span>
+                <span>${getCartTotal().toFixed(2)}</span>
+              </div>
+              <div style={{ ...styles.totalRow, fontSize: '22px', fontWeight: '800', borderTop: '1px solid var(--border)', paddingTop: '16px', marginTop: '8px' }}>
+                <span>Total a Pagar:</span>
+                <span style={{ color: 'var(--primary)' }}>${getCartTotal().toFixed(2)}</span>
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px', marginTop: '20px' }}>
+                <button
+                  onClick={() => setMetodoPago('efectivo')}
+                  style={{
+                    ...styles.payMethodBtn,
+                    ...(metodoPago === 'efectivo' ? styles.payMethodBtnActive : {})
+                  }}
+                >
+                  <DollarSign size={16} />
+                  <span>Efectivo</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setMetodoPago('tarjeta');
+                    setShowCardModal(true);
+                  }}
+                  style={{
+                    ...styles.payMethodBtn,
+                    ...(metodoPago === 'tarjeta' ? styles.payMethodBtnActive : {})
+                  }}
+                >
+                  <CreditCard size={16} />
+                  <span>Tarjeta</span>
+                </button>
+              </div>
+
+              {metodoPago === 'efectivo' && cart.length > 0 && (
+                <div style={{ marginTop: '16px', textAlign: 'left' }}>
+                  <div className="form-group" style={{ marginBottom: '12px' }}>
+                    <label className="form-label">Efectivo Recibido</label>
+                    <input
+                      type="number"
+                      className="form-input"
+                      placeholder="Ingrese importe..."
+                      value={pagoRecibido}
+                      onChange={(e) => setPagoRecibido(e.target.value)}
+                      style={{ padding: '12px 14px' }}
+                    />
+                  </div>
+                  {parseFloat(pagoRecibido || 0) >= getCartTotal() && (
+                    <div style={styles.changeDisplay}>
+                      <span>Cambio a devolver:</span>
+                      <strong style={{ fontSize: '15px' }}>${getCambio().toFixed(2)}</strong>
                     </div>
                   )}
-                  
-                  <div style={styles.productInfo}>
-                    <span style={styles.productCat}>{product.categoria_display}</span>
-                    <h3 style={styles.productName}>{product.nombre}</h3>
-                    <div style={styles.productBottom}>
-                      <span style={styles.productPrice}>${parseFloat(product.precio).toFixed(2)}</span>
-                      
-                      {product.tipo === 'pan' && (
-                        <span 
-                          style={{
-                            ...styles.productStock,
-                            color: isOut ? 'var(--danger)' : isLow ? 'var(--warning)' : 'var(--text-muted)'
-                          }}
-                        >
-                          {isOut ? 'Agotado' : `Stock: ${stock}`}
-                        </span>
-                      )}
-                    </div>
-                  </div>
                 </div>
-              );
-            })}
+              )}
 
-            {getFilteredProducts().length === 0 && (
-              <div style={styles.emptyCatalog}>
-                <Compass size={40} color="var(--text-muted)" />
-                <p>No se encontraron productos coincidentes en el catálogo.</p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* COLUMNA DERECHA: CARRITO Y COBRO */}
-        <div style={styles.cartColumn}>
-          <div style={styles.cartHeader}>
-            <ShoppingCart size={20} color="var(--secondary)" />
-            <h2 style={{ fontSize: '18px' }}>Carrito de Venta</h2>
-            {cart.length > 0 && (
-              <span className="badge badge-success" style={{ marginLeft: '8px' }}>
-                {cart.reduce((sum, i) => sum + i.cantidad, 0)}
-              </span>
-            )}
-          </div>
-
-          {/* LISTA DEL CARRITO */}
-          <div style={styles.cartList}>
-            {cart.length === 0 ? (
-              <div style={styles.emptyCart}>
-                <span>🍞 Carrito vacío</span>
-                <p>Haz clic en los panes o abarrotes de la izquierda para agregarlos a la orden.</p>
-              </div>
-            ) : (
-              cart.map((item) => (
-                <div key={`${item.tipo}-${item.id}`} style={styles.cartItem}>
-                  <div style={styles.cartItemDetails}>
-                    <span style={styles.cartItemName}>{item.nombre}</span>
-                    <span style={styles.cartItemSub}>
-                      ${parseFloat(item.precio).toFixed(2)} c/u • {item.categoria_display}
-                    </span>
-                  </div>
-                  
-                  <div style={styles.cartItemActions}>
-                    <button 
-                      onClick={() => removeFromCart(item)}
-                      style={styles.cartCountBtn}
-                    >
-                      <Minus size={12} />
-                    </button>
-                    <span style={styles.cartItemQty}>{item.cantidad}</span>
-                    <button 
-                      onClick={() => addToCart(item)}
-                      style={styles.cartCountBtn}
-                    >
-                      <Plus size={12} />
-                    </button>
-                    
-                    <span style={styles.cartItemTotal}>
-                      ${(parseFloat(item.precio) * item.cantidad).toFixed(2)}
-                    </span>
-                    
-                    <button 
-                      onClick={() => deleteFromCart(item.id, item.tipo)}
-                      style={styles.cartDeleteBtn}
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-
-          {/* CAJÓN DE COBRO */}
-          <div style={styles.checkoutDrawer}>
-            <div style={styles.totalRow}>
-              <span>Subtotal:</span>
-              <span>${getCartTotal().toFixed(2)}</span>
-            </div>
-            <div style={{ ...styles.totalRow, fontSize: '20px', fontWeight: '800', borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
-              <span>Total a Pagar:</span>
-              <span style={{ color: 'var(--primary)' }}>${getCartTotal().toFixed(2)}</span>
-            </div>
-
-            <div style={{ display: 'flex', gap: '12px', marginTop: '16px' }}>
-              <button
-                onClick={() => setMetodoPago('efectivo')}
-                style={{
-                  ...styles.payMethodBtn,
-                  ...(metodoPago === 'efectivo' ? styles.payMethodBtnActive : {})
-                }}
-              >
-                <DollarSign size={16} />
-                <span>Efectivo</span>
-              </button>
               <button
                 onClick={() => {
-                  setMetodoPago('tarjeta');
-                  setShowCardModal(true);
+                  if (metodoPago === 'tarjeta') {
+                    setShowCardModal(true);
+                  } else {
+                    handleCobrar();
+                  }
                 }}
-                style={{
-                  ...styles.payMethodBtn,
-                  ...(metodoPago === 'tarjeta' ? styles.payMethodBtnActive : {})
-                }}
+                className="btn btn-primary"
+                disabled={cart.length === 0 || loading || (metodoPago === 'efectivo' && parseFloat(pagoRecibido || 0) < getCartTotal())}
+                style={{ width: '100%', marginTop: '28px', padding: '14px', fontSize: '15px', fontWeight: '750' }}
               >
-                <CreditCard size={16} />
-                <span>Tarjeta</span>
+                <Receipt size={18} />
+                <span>{metodoPago === 'tarjeta' ? 'Proceder al Pago con Tarjeta' : 'Registrar y Cobrar Venta'}</span>
               </button>
             </div>
-
-            {metodoPago === 'efectivo' && cart.length > 0 && (
-              <div style={{ marginTop: '12px' }}>
-                <div className="form-group" style={{ marginBottom: '8px' }}>
-                  <label className="form-label">Efectivo Recibido</label>
-                  <input
-                    type="number"
-                    className="form-input"
-                    placeholder="Ingrese importe..."
-                    value={pagoRecibido}
-                    onChange={(e) => setPagoRecibido(e.target.value)}
-                  />
-                </div>
-                {parseFloat(pagoRecibido || 0) >= getCartTotal() && (
-                  <div style={styles.changeDisplay}>
-                    <span>Cambio a devolver:</span>
-                    <strong>${getCambio().toFixed(2)}</strong>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {metodoPago === 'tarjeta' && cart.length > 0 && (
-              <div style={{ marginTop: '12px' }}>
-                <div className="form-group" style={{ marginBottom: '8px' }}>
-                  <label className="form-label">Nombre en la tarjeta</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="Nombre tal como aparece en la tarjeta"
-                    value={cardHolderName}
-                    onChange={(e) => setCardHolderName(e.target.value)}
-                  />
-                </div>
-
-                <div className="form-group" style={{ marginBottom: '8px' }}>
-                  <label className="form-label">Datos de la tarjeta</label>
-                  <div
-                    ref={cardElementRef}
-                    style={{
-                      padding: '14px 12px',
-                      border: '1px solid var(--border)',
-                      borderRadius: '10px',
-                      backgroundColor: '#fff'
-                    }}
-                  ></div>
-                </div>
-
-                {cardError && (
-                  <div style={{ color: '#dc2626', fontSize: '13px', marginTop: '4px' }}>
-                    {cardError}
-                  </div>
-                )}
-
-                <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '8px' }}>
-                  Usa la tarjeta de prueba: <strong>4242 4242 4242 4242</strong>
-                </div>
-              </div>
-            )}
-
-            <button
-              onClick={handleCobrar}
-              className="btn btn-primary"
-              disabled={cart.length === 0 || loading || (metodoPago === 'efectivo' && parseFloat(pagoRecibido || 0) < getCartTotal())}
-              style={{ width: '100%', marginTop: '20px', padding: '14px' }}
-            >
-              <Receipt size={18} />
-              <span>Registrar y Cobrar Venta</span>
-            </button>
           </div>
-        </div>
+        )}
       </div>
 
       {/* MODAL DE TICKET SIMULADO */}
@@ -661,15 +965,358 @@ export const POS = () => {
               <p>Pan horneado con amor hoy mismo.</p>
             </div>
 
-            <button 
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '24px' }}>
+              <button 
+                onClick={() => {
+                  setShowTicket(false);
+                  setShowInvoiceModal(true);
+                }}
+                className="btn btn-primary"
+                style={{ width: '100%', padding: '12px' }}
+              >
+                📝 Generar Factura CFDI 4.0
+              </button>
+              
+              <button 
+                onClick={() => {
+                  setShowTicket(false);
+                  setTicketData(null);
+                }}
+                className="btn btn-secondary"
+                style={{ width: '100%', padding: '12px' }}
+              >
+                Cerrar y Nueva Venta
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE TARJETA STRIPE (Siempre en el DOM pero oculto vía display para conservar el mounting de Stripe) */}
+      <div style={{ ...styles.modalOverlay, display: showCardModal ? 'flex' : 'none' }}>
+        <div style={styles.cardModalContainer}>
+          <div style={styles.cardModalHeader}>
+            <CreditCard size={28} color="var(--primary)" />
+            <h2 style={{ fontSize: '18px', margin: 0, color: 'var(--secondary)' }}>Pago con Tarjeta (Stripe)</h2>
+          </div>
+          
+          <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '20px', marginTop: '8px', textAlign: 'left' }}>
+            Monto total a cobrar: <strong style={{ color: 'var(--primary)', fontSize: '16px' }}>${getCartTotal().toFixed(2)} MXN</strong>
+          </p>
+
+          <div className="form-group" style={{ marginBottom: '16px', textAlign: 'left' }}>
+            <label className="form-label">Nombre del Titular</label>
+            <input
+              type="text"
+              className="form-input"
+              placeholder="Ej. Juan Pérez"
+              value={cardHolderName}
+              onChange={(e) => setCardHolderName(e.target.value)}
+              style={{ width: '100%', padding: '10px 14px' }}
+            />
+          </div>
+
+          <div className="form-group" style={{ marginBottom: '16px', textAlign: 'left' }}>
+            <label className="form-label">Datos de la Tarjeta</label>
+            <div
+              ref={cardElementRef}
+              style={{
+                padding: '14px 12px',
+                border: '1px solid var(--border)',
+                borderRadius: '10px',
+                backgroundColor: '#fff'
+              }}
+            ></div>
+          </div>
+
+          {cardError && (
+            <div style={{ color: '#dc2626', fontSize: '12px', marginTop: '6px', textAlign: 'left', fontWeight: '600' }}>
+              ⚠️ {cardError}
+            </div>
+          )}
+
+          <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '16px', backgroundColor: 'var(--background)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border)', textAlign: 'left', lineHeight: '1.4' }}>
+            💳 **Tarjeta de pruebas (Stripe):** <br />
+            Número: <strong style={{ color: 'var(--secondary)' }}>4242 4242 4242 4242</strong> <br />
+            Fecha: **Cualquiera en el futuro** | CVC: **123**
+          </div>
+
+          <div style={{ display: 'flex', gap: '12px', marginTop: '28px' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
               onClick={() => {
-                setShowTicket(false);
+                setShowCardModal(false);
+                setMetodoPago('efectivo');
+              }}
+              style={{ flex: 1, padding: '12px' }}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleCobrar}
+              disabled={loading || !cardReady}
+              style={{ flex: 1, padding: '12px' }}
+            >
+              {loading ? 'Procesando...' : 'Confirmar y Pagar'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* MODAL DE FORMULARIO DE FACTURACIÓN (CFDI 4.0) */}
+      {showInvoiceModal && (
+        <div style={styles.modalOverlay}>
+          <div style={{ ...styles.cardModalContainer, width: '480px' }}>
+            <div style={styles.cardModalHeader}>
+              <Receipt size={28} color="var(--primary)" />
+              <h2 style={{ fontSize: '18px', margin: 0, color: 'var(--secondary)' }}>Datos de Facturación CFDI 4.0</h2>
+            </div>
+
+            <form onSubmit={handleGenerarFactura} style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginTop: '10px' }}>
+              
+              <div className="form-group" style={{ textAlign: 'left' }}>
+                <label className="form-label">RFC del Receptor *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Ej. EKU9003173C9"
+                  value={invoiceForm.rfc}
+                  onChange={(e) => setInvoiceForm(prev => ({ ...prev, rfc: e.target.value.toUpperCase() }))}
+                  required
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              <div className="form-group" style={{ textAlign: 'left' }}>
+                <label className="form-label">Nombre o Razón Social *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Ej. ESCUELA KEMPER URGATE"
+                  value={invoiceForm.nombre}
+                  onChange={(e) => setInvoiceForm(prev => ({ ...prev, nombre: e.target.value.toUpperCase() }))}
+                  required
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <div className="form-group" style={{ flex: 1, textAlign: 'left' }}>
+                  <label className="form-label">Código Postal *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Ej. 01030"
+                    maxLength={5}
+                    value={invoiceForm.codigo_postal}
+                    onChange={(e) => setInvoiceForm(prev => ({ ...prev, codigo_postal: e.target.value.replace(/\D/g, '') }))}
+                    required
+                  />
+                </div>
+                
+                <div className="form-group" style={{ flex: 2, textAlign: 'left' }}>
+                  <label className="form-label">Uso de CFDI *</label>
+                  <select
+                    className="form-input"
+                    value={invoiceForm.uso_cfdi}
+                    onChange={(e) => setInvoiceForm(prev => ({ ...prev, uso_cfdi: e.target.value }))}
+                    style={{ padding: '10px' }}
+                  >
+                    <option value="G01">G01 - Adquisición de mercancías</option>
+                    <option value="G03">G03 - Gastos en general</option>
+                    <option value="S01">S01 - Sin efectos fiscales</option>
+                    <option value="CP01">CP01 - Pagos</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-group" style={{ textAlign: 'left' }}>
+                <label className="form-label">Régimen Fiscal *</label>
+                <select
+                  className="form-input"
+                  value={invoiceForm.regimen_fiscal}
+                  onChange={(e) => setInvoiceForm(prev => ({ ...prev, regimen_fiscal: e.target.value }))}
+                  style={{ padding: '10px' }}
+                >
+                  <option value="601">601 - General de Ley Personas Morales</option>
+                  <option value="605">605 - Sueldos y Salarios e Ingresos Asimilados</option>
+                  <option value="612">612 - Personas Físicas con Actividades Empresariales</option>
+                  <option value="626">626 - Régimen Simplificado de Confianza (RESICO)</option>
+                </select>
+              </div>
+
+
+
+              {invoiceError && (
+                <div style={{ color: '#dc2626', fontSize: '12px', textAlign: 'left', fontWeight: '600' }}>
+                  ⚠️ {invoiceError}
+                </div>
+              )}
+
+              {/* Botón de Auto-completar Credenciales de Prueba */}
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ fontSize: '11px', padding: '8px', borderStyle: 'dashed', borderColor: 'var(--primary)' }}
+                onClick={() => {
+                  setInvoiceForm({
+                    rfc: 'EKU9003173C9',
+                    nombre: 'ESCUELA KEMPER URGATE',
+                    codigo_postal: '01030',
+                    regimen_fiscal: '601',
+                    uso_cfdi: 'G03',
+                    email: invoiceForm.email || 'cliente_prueba@gmail.com'
+                  });
+                }}
+              >
+                ⚡ Auto-completar RFC de Prueba Facturama
+              </button>
+
+              <div style={{ display: 'flex', gap: '12px', marginTop: '16px' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setShowInvoiceModal(false);
+                    setInvoiceForm({ rfc: '', nombre: '', codigo_postal: '', regimen_fiscal: '601', uso_cfdi: 'G03', email: '' });
+                  }}
+                  style={{ flex: 1 }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={invoiceLoading}
+                  style={{ flex: 1 }}
+                >
+                  {invoiceLoading ? 'Timbrando...' : 'Generar Factura'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE ÉXITO DE FACTURACIÓN (Descargas XML/PDF y envío de correo) */}
+      {showInvoiceSuccess && invoiceData && (
+        <div style={styles.modalOverlay}>
+          <div style={{ ...styles.cardModalContainer, width: '440px', textAlign: 'center' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
+              <div style={{
+                width: '56px',
+                height: '56px',
+                borderRadius: '50%',
+                backgroundColor: 'var(--success-bg)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--success)',
+                fontSize: '24px'
+              }}>
+                ✓
+              </div>
+              <h2 style={{ fontSize: '20px', margin: 0, color: 'var(--secondary)' }}>Factura Timbrada con Éxito</h2>
+              <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>
+                El comprobante fiscal CFDI 4.0 ha sido certificado ante el SAT.
+              </p>
+            </div>
+
+            <div style={{
+              backgroundColor: 'var(--background)',
+              padding: '16px',
+              borderRadius: '10px',
+              border: '1px solid var(--border)',
+              textAlign: 'left',
+              fontSize: '13px',
+              marginBottom: '24px'
+            }}>
+              <div style={{ marginBottom: '6px' }}>
+                RFC Receptor: <strong style={{ color: 'var(--secondary)' }}>{invoiceForm.rfc}</strong>
+              </div>
+              <div style={{ marginBottom: '6px' }}>
+                Razón Social: <strong style={{ color: 'var(--secondary)' }}>{invoiceForm.nombre}</strong>
+              </div>
+              <div style={{ borderTop: '1px dashed var(--border)', margin: '8px 0', paddingTop: '8px' }}>
+                UUID Fiscal: <br />
+                <span style={{ fontSize: '11px', fontFamily: 'monospace', fontWeight: '700', color: 'var(--primary)' }}>
+                  {invoiceData.uuid}
+                </span>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '24px' }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => descargarArchivoFactura(invoiceData.pdf_base64, `factura_${invoiceForm.rfc}.pdf`, 'application/pdf')}
+                style={{ width: '100%', padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+              >
+                📥 Descargar Factura (PDF)
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  const blob = new Blob([invoiceData.xml_data], { type: "text/xml" });
+                  const url = window.URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `factura_${invoiceForm.rfc}.xml`;
+                  a.click();
+                }}
+                style={{ width: '100%', padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+              >
+                📄 Descargar Archivo XML
+              </button>
+
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  const msg = `¡Hola! Te compartimos tu Factura CFDI 4.0 de Panadería PanaPina. 🍞\n\nReceptor: ${invoiceForm.nombre}\nRFC: ${invoiceForm.rfc}\nUUID Fiscal: ${invoiceData.uuid}\n\n¡Gracias por tu preferencia!`;
+                  const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`;
+                  window.open(whatsappUrl, '_blank');
+                }}
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  backgroundColor: '#25D366',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '10px',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(37, 211, 102, 0.25)',
+                  marginTop: '4px'
+                }}
+              >
+                💬 Compartir por WhatsApp
+              </button>
+            </div>
+
+
+
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                setShowInvoiceSuccess(false);
+                setInvoiceData(null);
+                setInvoiceForm({ rfc: '', nombre: '', codigo_postal: '', regimen_fiscal: '601', uso_cfdi: 'G03', email: '' });
                 setTicketData(null);
               }}
-              className="btn btn-primary"
-              style={{ width: '100%', marginTop: '24px' }}
+              style={{ width: '100%', padding: '12px' }}
             >
-              Cerrar y Nueva Venta
+              Cerrar y Regresar al Catálogo
             </button>
           </div>
         </div>
@@ -707,11 +1354,11 @@ const styles = {
     alignItems: 'center'
   },
   mainLayout: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 380px',
-    gap: '24px',
+    display: 'flex',
+    flexDirection: 'column',
     height: 'calc(100vh - 144px)',
-    overflow: 'hidden'
+    overflow: 'hidden',
+    width: '100%'
   },
   catalogoColumn: {
     display: 'flex',
@@ -784,12 +1431,15 @@ const styles = {
   productPlaceholder: {
     width: '100%',
     height: '110px',
-    backgroundColor: 'var(--primary-light)',
+    background: 'linear-gradient(135deg, #fdf6e2 0%, #f7ebd0 100%)',
     borderRadius: '10px',
     display: 'flex',
+    flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    fontSize: '32px'
+    gap: '6px',
+    border: '1px dashed #e6c89c',
+    fontSize: '28px'
   },
   productInfo: {
     display: 'flex',
@@ -861,64 +1511,112 @@ const styles = {
     textAlign: 'center',
     padding: '24px'
   },
-  cartItem: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-    paddingBottom: '12px',
-    borderBottom: '1px solid var(--border)'
-  },
-  cartItemDetails: {
-    display: 'flex',
-    flexDirection: 'column',
-    textAlign: 'left'
-  },
-  cartItemName: {
-    fontSize: '14px',
-    fontWeight: '700',
-    color: 'var(--secondary)'
-  },
-  cartItemSub: {
-    fontSize: '11px',
-    color: 'var(--text-muted)'
-  },
-  cartItemActions: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: '8px'
-  },
-  cartCountBtn: {
-    width: '24px',
-    height: '24px',
-    borderRadius: '6px',
-    border: '1px solid var(--border)',
+  cartItemThumb: {
+    width: '36px',
+    height: '36px',
+    borderRadius: '8px',
     backgroundColor: 'var(--background)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    cursor: 'pointer',
-    color: 'var(--text-main)'
+    overflow: 'hidden',
+    border: '1px solid var(--border)',
+    flexShrink: 0
   },
-  cartItemQty: {
-    fontSize: '13px',
-    fontWeight: '700',
-    width: '20px',
-    textAlign: 'center'
+  cartItemImg: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover'
   },
-  cartItemTotal: {
+  cartItemInfo: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    textAlign: 'left',
+    minWidth: 0
+  },
+  cartItemNameText: {
     fontSize: '13px',
     fontWeight: '700',
     color: 'var(--secondary)',
-    marginLeft: 'auto',
-    marginRight: '8px'
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis'
   },
-  cartDeleteBtn: {
+  cartItemMeta: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    marginTop: '2px'
+  },
+  cartItemUnitPrice: {
+    fontSize: '11px',
+    fontWeight: '600',
+    color: 'var(--primary)'
+  },
+  cartItemDivider: {
+    fontSize: '10px',
+    color: 'var(--text-muted)'
+  },
+  cartItemCategory: {
+    fontSize: '10px',
+    color: 'var(--text-muted)',
+    fontWeight: '500'
+  },
+  cartItemQtyControls: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    backgroundColor: 'var(--background)',
+    padding: '3px',
+    borderRadius: '8px',
+    border: '1px solid var(--border)'
+  },
+  cartQtyBtn: {
+    width: '20px',
+    height: '20px',
+    borderRadius: '5px',
+    border: 'none',
+    backgroundColor: 'var(--card-bg)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    color: 'var(--text-main)',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+    transition: 'all 0.1s ease'
+  },
+  cartQtyVal: {
+    fontSize: '12px',
+    fontWeight: '700',
+    minWidth: '16px',
+    textAlign: 'center',
+    color: 'var(--secondary)'
+  },
+  cartItemRight: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    marginLeft: '4px'
+  },
+  cartItemSubtotal: {
+    fontSize: '13px',
+    fontWeight: '800',
+    color: 'var(--secondary)',
+    minWidth: '55px',
+    textAlign: 'right'
+  },
+  cartItemDelete: {
     border: 'none',
     background: 'none',
     color: 'var(--danger)',
     cursor: 'pointer',
-    padding: '4px'
+    padding: '4px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    opacity: 0.8,
+    transition: 'opacity 0.1s ease'
   },
   checkoutDrawer: {
     padding: '20px',
@@ -951,8 +1649,9 @@ const styles = {
   },
   payMethodBtnActive: {
     borderColor: 'var(--primary)',
-    color: 'var(--primary)',
-    backgroundColor: 'var(--primary-light)'
+    color: '#fff',
+    backgroundColor: 'var(--primary)',
+    boxShadow: '0 4px 12px rgba(180, 83, 9, 0.25)'
   },
   changeDisplay: {
     marginTop: '12px',
@@ -1049,5 +1748,42 @@ const styles = {
     color: 'var(--text-muted)',
     fontSize: '14px',
     textAlign: 'center'
+  },
+  cartItemRowTop: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    width: '100%'
+  },
+  cartItemRowBottom: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    borderTop: '1px dashed var(--border)',
+    paddingTop: '8px',
+    marginTop: '2px'
+  },
+  cardModalContainer: {
+    width: '400px',
+    maxHeight: 'calc(100vh - 40px)',
+    overflowY: 'auto',
+    backgroundColor: 'var(--card-bg)',
+    borderRadius: '16px',
+    border: '1px solid var(--border)',
+    boxShadow: 'var(--shadow-lg)',
+    padding: '28px',
+    display: 'flex',
+    flexDirection: 'column',
+    position: 'relative',
+    animation: 'slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
+  },
+  cardModalHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    borderBottom: '1px solid var(--border)',
+    paddingBottom: '14px',
+    marginBottom: '16px'
   }
 };

@@ -99,6 +99,7 @@ export const Login = () => {
           </button>
         </form>
 
+
       </div>
     </div>
   );
@@ -178,32 +179,5 @@ const styles = {
     padding: '14px',
     fontSize: '16px',
     borderRadius: 'var(--radius-md)'
-  },
-  tipsContainer: {
-    marginTop: '24px',
-    paddingTop: '24px',
-    borderTop: '1px solid var(--border)',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: '8px'
-  },
-  tipsTitle: {
-    fontSize: '12px',
-    fontWeight: '700',
-    color: 'var(--text-muted)',
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px'
-  },
-  codeBlock: {
-    fontSize: '12px',
-    backgroundColor: 'var(--background)',
-    color: 'var(--secondary)',
-    padding: '4px 10px',
-    borderRadius: '6px',
-    border: '1px solid var(--border)',
-    width: '100%',
-    textAlign: 'center',
-    fontWeight: '600'
   }
 };

@@ -461,3 +461,82 @@ Su objetivo es:
 **Confirmación de pago**
 
 <img src="Imagenes/image-8.png" width="100"/>
+
+---
+
+# Documentación de API Integrada: Facturación Electrónica (Facturama CFDI 4.0 + WhatsApp)
+
+## ¿Qué APIs se utilizan?
+
+Se utilizan dos APIs principales para el módulo de facturación del punto de venta (POS):
+1. **API de Facturama (Sandbox):** Servicio web REST para la generación, certificación y timbrado de Comprobantes Fiscales Digitales por Internet (CFDI 4.0) ante el SAT.
+2. **API de WhatsApp Web:** Enlaces de compartición directa para enviar el comprobante de forma instantánea al cliente.
+
+**Proveedor:** Facturama S.A. de C.V. / WhatsApp Meta  
+**Tipo de API:** REST API / HTTP URI Schemes.
+
+---
+
+## ¿Para qué se utilizan?
+
+Las APIs se utilizan para automatizar y cumplir con la legislación fiscal mexicana de manera digital desde el punto de venta de PanaPina:
+* **Facturama:** Certifica los datos de la compra (productos, precios, IVA) y genera el Folio Fiscal UUID junto con los archivos XML y representaciones impresas PDF oficiales.
+* **WhatsApp:** Envía los datos resumidos de la factura (Receptor, RFC, UUID) en un mensaje instantáneo directamente a la cuenta del cliente.
+
+---
+
+## ¿Cómo se utilizan?
+
+### Tipo de autenticación (Facturama)
+* **Basic Auth:** Autenticación por cabecera HTTP utilizando el usuario y contraseña de desarrollo de Facturama codificados en Base64.
+  * **Cabecera:** `Authorization: Basic RGFtYXJpczpQYW9sYTE4MTgkJA==`
+  * **Credenciales de Sandbox:** Usuario: `Damaris` | Contraseña: `Paola1818$$`
+
+---
+
+### Endpoints Consumidos
+
+| Método | Endpoint | Proveedor | Descripción |
+| :--- | :--- | :--- | :--- |
+| **POST** | `/3/cfdis` | Facturama | Crea y timbra un nuevo CFDI 4.0 ante el SAT. |
+| **GET** | `/3/cfdis/{cfdiId}/xml` | Facturama | Descarga el archivo XML fiscal. |
+| **GET** | `/3/cfdis/{cfdiId}/pdf` | Facturama | Descarga el archivo PDF de la factura. |
+| **GET** | `https://api.whatsapp.com/send` | WhatsApp | Abre chat directo de compartición. |
+
+---
+
+### Flujo de Información
+
+1. El cajero finaliza el cobro y presiona **Generar Factura** desde el modal de ticket.
+2. Se abre un formulario para capturar los datos fiscales del receptor (RFC, Razón Social, Código Postal, Uso de CFDI y Régimen Fiscal).
+3. El frontend envía una solicitud `POST` a nuestro proxy backend `/api/ventas/:id/facturar` con los datos del receptor.
+4. El backend lee los datos de la venta `:id` en PostgreSQL, formatea los conceptos (panes, bebidas), y hace la solicitud HTTP a Facturama.
+5. Facturama valida la información ante el SAT, genera el timbre y retorna el UUID fiscal.
+6. El backend guarda los archivos y el UUID en la tabla local `facturas`.
+7. **Simulador de Respaldo:** Si la API externa no está disponible, el backend genera localmente un XML de CFDI 4.0 válido y un PDF premium en Base64 para que la operación nunca se detenga.
+8. En el POS, el cajero puede descargar el PDF y XML originales, o presionar **Compartir por WhatsApp** para mandarle la información al cliente de manera instantánea.
+
+---
+
+### Datos Intercambiados en el Timbrado
+* **Receiver:** RFC, Name (Razón Social), TaxZipCode (Domicilio fiscal), FiscalRegime y CfdiUse.
+* **Items:** Listado de productos con Quantity (cantidad), ProductCode (Clave SAT, ej. `50181900`), UnitPrice, Subtotal, y Taxes (Base e Impuesto al 0% o 16%).
+
+---
+
+### Estructura de Datos Local (Tabla `facturas` en PostgreSQL)
+```sql
+CREATE TABLE IF NOT EXISTS facturas (
+  id SERIAL PRIMARY KEY,
+  venta_id INT UNIQUE REFERENCES ventas(id) ON DELETE CASCADE,
+  uuid VARCHAR(100) NOT NULL,
+  rfc_receptor VARCHAR(15) NOT NULL,
+  nombre_receptor VARCHAR(150) NOT NULL,
+  codigo_postal_receptor VARCHAR(10) NOT NULL,
+  regimen_fiscal_receptor VARCHAR(10) NOT NULL,
+  uso_cfdi VARCHAR(10) NOT NULL,
+  xml_data TEXT NOT NULL,
+  pdf_base64 TEXT NOT NULL,
+  creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```

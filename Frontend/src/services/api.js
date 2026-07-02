@@ -702,6 +702,38 @@ function handleOfflineRequest(endpoint, options) {
           reject(new Error('Pedido no encontrado'));
         }
       }
+      else if (endpoint === '/stripe/payment' && method === 'POST') {
+        resolve({
+          success: true,
+          client_secret: 'pi_mock_secret_123456789_secret_987654321'
+        });
+      }
+
+      else if (endpoint.startsWith('/ventas/') && endpoint.endsWith('/facturar') && method === 'POST') {
+        const id = parseInt(endpoint.split('/')[2]);
+        const uuid = 'f6b28a9b-7e61-419b-810a-3c589b2b50d3'; // Mock UUID
+        
+        // Buscar la venta en LocalStorage
+        const ventas = getLocalData('ventas') || [];
+        const venta = ventas.find(v => v.id === id) || {
+          total: 100,
+          creado_en: new Date().toISOString(),
+          detalles: [{ nombre_producto: 'Consumo Panaderia', cantidad: 1, precio_unitario: 100, subtotal: 100 }]
+        };
+
+        // Simular XML fiscal y PDF base64
+        const xml_data = generateMockInvoiceXMLClient(venta, body.rfc, body.nombre, body.codigo_postal || '01030', body.regimen_fiscal || '601', body.uso_cfdi || 'G03', uuid);
+        const pdf_base64 = generateMockInvoicePDFClient(venta, body.rfc, body.nombre, body.codigo_postal || '01030', uuid);
+
+        resolve({
+          success: true,
+          data: {
+            uuid,
+            xml_data,
+            pdf_base64
+          }
+        });
+      }
 
       else {
         reject(new Error('Endpoint no soportado en modo offline'));
@@ -764,6 +796,8 @@ export const api = {
       request(`/ventas/${id}`),
     cancel: (id, razon) => 
       request(`/ventas/${id}/cancelar`, { method: 'POST', body: { razon } }),
+    facturar: (id, data) =>
+      request(`/ventas/${id}/facturar`, { method: 'POST', body: data }),
   },
 
   // Stripe
@@ -855,3 +889,168 @@ export const api = {
       request(`/clima?ciudad=${encodeURIComponent(ciudad || '')}`),
   }
 };
+
+function generateMockInvoicePDFClient(venta, rfc, nombre, CP, uuid) {
+  const sanitize = (txt) => {
+    if (!txt) return '';
+    return txt.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[()]/g, '');
+  };
+
+  const dateStr = new Date(venta.creado_en || new Date()).toLocaleString();
+  const total = parseFloat(venta.total).toFixed(2);
+  const subtotal = parseFloat(venta.total).toFixed(2);
+  const detalles = venta.detalles || [];
+  
+  let stream = '';
+  stream += 'q\n';
+  stream += '0.85 0.38 0.08 rg 30 710 552 60 re f\n';
+  stream += 'Q\n';
+  
+  // Encabezado
+  stream += 'BT /F2 18 Tf 1 1 1 rg 45 745 Td (PANADERIA PANAPINA) Tj ET\n';
+  stream += 'BT /F1 9 Tf 1 1 1 rg 45 725 Td (Factura Electronica CFDI 4.0 - COMPROBANTE FISCAL) Tj ET\n';
+  
+  // Emisor
+  stream += 'BT /F2 10 Tf 0 0 0 rg 40 680 Td (EMISOR:) Tj ET\n';
+  stream += 'BT /F1 9 Tf 0 0 0 rg 40 665 Td (PANADERIA PANAPINA S.A. DE C.V.) Tj ET\n';
+  stream += 'BT /F1 9 Tf 0 0 0 rg 40 653 Td (RFC: PPA181818PP3) Tj ET\n';
+  stream += 'BT /F1 9 Tf 0 0 0 rg 40 641 Td (Regimen: 601 - General de Ley Personas Morales) Tj ET\n';
+  stream += 'BT /F1 9 Tf 0 0 0 rg 40 629 Td (CP: 01030) Tj ET\n';
+
+  // Receptor
+  stream += 'BT /F2 10 Tf 0 0 0 rg 320 680 Td (RECEPTOR:) Tj ET\n';
+  stream += 'BT /F1 9 Tf 0 0 0 rg 320 665 Td (' + sanitize(nombre).substring(0, 30) + ') Tj ET\n';
+  stream += 'BT /F1 9 Tf 0 0 0 rg 320 653 Td (RFC: ' + sanitize(rfc) + ') Tj ET\n';
+  stream += 'BT /F1 9 Tf 0 0 0 rg 320 641 Td (CP: ' + sanitize(CP) + ') Tj ET\n';
+
+  // Datos fiscales
+  stream += 'BT /F2 9 Tf 0 0 0 rg 40 595 Td (Folio Fiscal UUID: ' + sanitize(uuid) + ') Tj ET\n';
+  stream += 'BT /F1 9 Tf 0 0 0 rg 40 583 Td (Fecha Emision: ' + sanitize(dateStr) + ' | Moneda: MXN | Metodo Pago: PUE) Tj ET\n';
+
+  // Tabla - Encabezados
+  stream += 'q\n';
+  stream += '0.95 0.95 0.95 rg 30 540 552 20 re f\n';
+  stream += 'Q\n';
+  
+  stream += 'BT /F2 9 Tf 0 0 0 rg 40 546 Td (CANT.) Tj ET\n';
+  stream += 'BT /F2 9 Tf 0 0 0 rg 80 546 Td (DESCRIPCION) Tj ET\n';
+  stream += 'BT /F2 9 Tf 0 0 0 rg 350 546 Td (P. UNITARIO) Tj ET\n';
+  stream += 'BT /F2 9 Tf 0 0 0 rg 430 546 Td (TASA IVA) Tj ET\n';
+  stream += 'BT /F2 9 Tf 0 0 0 rg 500 546 Td (IMPORTE) Tj ET\n';
+
+  stream += '0.5 w 30 560 m 582 560 l S\n';
+  stream += '0.5 w 30 540 m 582 540 l S\n';
+
+  let currentY = 520;
+  detalles.forEach(d => {
+    const desc = sanitize(d.nombre_producto || 'Pan');
+    const qty = d.cantidad || 1;
+    const price = parseFloat(d.precio_unitario || d.subtotal / d.cantidad || 0).toFixed(2);
+    const sub = parseFloat(d.subtotal || 0).toFixed(2);
+    const iva = d.tipo_producto === 'refri' ? '16%' : '0%';
+    
+    stream += `BT /F1 9 Tf 0 0 0 rg 40 ${currentY} Td (${qty}) Tj ET\n`;
+    stream += `BT /F1 9 Tf 0 0 0 rg 80 ${currentY} Td (${desc.substring(0, 35)}) Tj ET\n`;
+    stream += `BT /F1 9 Tf 0 0 0 rg 350 ${currentY} Td ($${price}) Tj ET\n`;
+    stream += `BT /F1 9 Tf 0 0 0 rg 430 ${currentY} Td (${iva}) Tj ET\n`;
+    stream += `BT /F1 9 Tf 0 0 0 rg 500 ${currentY} Td ($${sub}) Tj ET\n`;
+    
+    currentY -= 18;
+  });
+
+  stream += `0.5 w 30 ${currentY + 5} m 582 ${currentY + 5} l S\n`;
+
+  currentY -= 15;
+  stream += `BT /F1 9 Tf 0 0 0 rg 380 ${currentY} Td (Subtotal:) Tj ET\n`;
+  stream += `BT /F1 9 Tf 0 0 0 rg 500 ${currentY} Td ($${subtotal}) Tj ET\n`;
+  stream += `BT /F2 10 Tf 0 0 0 rg 380 ${currentY - 15} Td (TOTAL FACTURA:) Tj ET\n`;
+  stream += `BT /F2 10 Tf 0 0 0 rg 500 ${currentY - 15} Td ($${total} MXN) Tj ET\n`;
+
+  currentY -= 60;
+  stream += 'q\n';
+  stream += `0.92 0.92 0.92 rg 30 ${currentY - 70} 70 70 re f\n`;
+  stream += 'Q\n';
+
+  stream += `BT /F2 9 Tf 0 0 0 rg 120 ${currentY} Td (Sello Digital CFDI / SAT Certification) Tj ET\n`;
+  stream += `BT /F1 7 Tf 0 0 0 rg 120 ${currentY - 12} Td (Sello CFD: MOCK_SELLO_CFDI_DIGITAL_PANAPINA_SAT_2026_CFDI40_VALIDO_TEST) Tj ET\n`;
+  stream += `BT /F1 7 Tf 0 0 0 rg 120 ${currentY - 22} Td (Sello SAT: MOCK_SELLO_SAT_STAMP_DIGITAL_VERIFICATION_CERTIFIED_OK) Tj ET\n`;
+  stream += `BT /F1 7 Tf 0 0 0 rg 120 ${currentY - 32} Td (Cadena Original: ||1.1|${uuid}|2026-07-02T00:00:00|SAT970701NN3|MOCK_CADENA_ORIGINAL||) Tj ET\n`;
+  stream += `BT /F2 8 Tf 0 0 0 rg 120 ${currentY - 50} Td (Este documento es una representacion impresa de un CFDI 4.0) Tj ET\n`;
+
+  const contentObj = `4 0 obj\n<< /Length ${stream.length} >>\nstream\n${stream}endstream\nendobj`;
+  
+  const objects = [
+    '%PDF-1.4',
+    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj',
+    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj',
+    '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> /Contents 4 0 R >>\nendobj',
+    contentObj,
+    '5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj',
+    '6 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj'
+  ];
+
+  let pdfContent = '';
+  objects.forEach(obj => {
+    pdfContent += obj + '\n';
+  });
+  
+  pdfContent += 'xref\n0 7\n0000000000 65535 f \n';
+  pdfContent += 'trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n300\n%%EOF';
+  
+  return btoa(pdfContent);
+}
+
+function generateMockInvoiceXMLClient(venta, rfc, nombre, CP, regimen, uso, uuid) {
+  const dateStr = new Date(venta.creado_en || new Date()).toISOString();
+  const total = parseFloat(venta.total).toFixed(2);
+  const subtotal = parseFloat(venta.total).toFixed(2);
+  const detalles = venta.detalles || [];
+  
+  let xml = '<?xml version="1.0" encoding="utf-8"?>\n';
+  xml += `<cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.sat.gob.mx/cfd/4 http://www.sat.gob.mx/sitio_internet/cfd/4/cfdv40.xsd" Version="4.0" Serie="A" Folio="${venta.id}" Fecha="${dateStr}" SubTotal="${subtotal}" Moneda="MXN" Total="${total}" TipoDeComprobante="I" Exportacion="01" MetodoPago="PUE" LugarExpedicion="01030">\n`;
+  
+  // Emisor
+  xml += `  <cfdi:Emisor Rfc="PPA181818PP3" Nombre="PANADERIA PANAPINA S.A. DE C.V." RegimenFiscal="601"/>\n`;
+  
+  // Receptor
+  xml += `  <cfdi:Receptor Rfc="${rfc}" Nombre="${nombre}" DomicilioFiscalReceptor="${CP}" RegimenFiscalReceptor="${regimen}" UsoCFDI="${uso}"/>\n`;
+  
+  // Conceptos
+  xml += `  <cfdi:Conceptos>\n`;
+  detalles.forEach((d, idx) => {
+    let productCode = '50181900';
+    if (d.tipo_producto === 'refri') {
+      productCode = '50202306';
+    } else if (d.tipo_producto === 'tienda') {
+      productCode = '50192100';
+    }
+    const qty = parseInt(d.cantidad);
+    const unitPrice = parseFloat(d.precio_unitario || d.precio || d.subtotal/qty).toFixed(2);
+    const sub = parseFloat(d.subtotal).toFixed(2);
+    
+    xml += `    <cfdi:Concepto ClaveProdServ="${productCode}" NoIdentificacion="PROD${idx}" Cantidad="${qty}.00" ClaveUnidad="H87" Unidad="Pieza" Descripcion="${d.nombre_producto}" ValorUnitario="${unitPrice}" Importe="${sub}" ObjetoImp="02">\n`;
+    xml += `      <cfdi:Impuestos>\n`;
+    xml += `        <cfdi:Traslados>\n`;
+    xml += `          <cfdi:Traslado Base="${sub}" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.000000" Importe="0.00"/>\n`;
+    xml += `        </cfdi:Traslados>\n`;
+    xml += `      </cfdi:Impuestos>\n`;
+    xml += `    </cfdi:Concepto>\n`;
+  });
+  xml += `  </cfdi:Conceptos>\n`;
+  
+  // Impuestos totales
+  xml += `  <cfdi:Impuestos TotalImpuestosTrasladados="0.00">\n`;
+  xml += `    <cfdi:Traslados>\n`;
+  xml += `      <cfdi:Traslado Base="${subtotal}" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.000000" Importe="0.00"/>\n`;
+  xml += `    </cfdi:Traslados>\n`;
+  xml += `  </cfdi:Impuestos>\n`;
+  
+  // Complemento Timbre Fiscal Digital
+  xml += `  <cfdi:Complemento>\n`;
+  xml += `    <tfd:TimbreFiscalDigital xmlns:tfd="http://www.sat.gob.mx/TimbreFiscalDigital" xsi:schemaLocation="http://www.sat.gob.mx/TimbreFiscalDigital http://www.sat.gob.mx/sitio_internet/cfd/TimbreFiscalDigital/TimbreFiscalDigitalv11.xsd" Version="1.1" UUID="${uuid}" FechaTimbrado="${dateStr}" RfcProvCertif="SAT970701NN3" SelloCFD="MOCK_SELLO_CFD_OK" SelloSAT="MOCK_SELLO_SAT_OK"/>\n`;
+  xml += `  </cfdi:Complemento>\n`;
+  
+  xml += `</cfdi:Comprobante>`;
+  
+  return xml;
+}
