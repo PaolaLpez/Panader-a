@@ -370,7 +370,7 @@ function handleOfflineRequest(endpoint, options) {
         } else if (cleanText.includes('crear') || cleanText.includes('producto') || cleanText.includes('inventario')) {
           botResponse = 'Para gestionar tu inventario:\n1. Ve a la pestaña **Inventario**.\n2. Ahí puedes ver los stocks actuales, modificar precios, costos y cambiar la disponibilidad de panes o abarrotes.';
         } else {
-          botResponse = 'Entiendo. Como tu asistente virtual, puedo guiarte sobre el uso de la panadería.\n\nSi deseas integrar una API de chat real para hablar con clientes o usar inteligencia avanzada, te recomiendo utilizar:\n* 💬 **Tawk.to** (Live Chat Gratuito): [https://www.tawk.to](https://www.tawk.to)\n* 🧠 **Gemini API** (Inteligencia de Google): [https://ai.google.dev](https://ai.google.dev)\n* 💬 **Crisp Chat** (Widget moderno): [https://crisp.chat](https://crisp.chat)';
+          botResponse = 'Entiendo. Como tu asistente virtual, puedo guiarte sobre el uso de la panadería. ¿Tienes alguna pregunta sobre el corte de caja, salidas de efectivo, catálogo de productos o la base de datos?';
         }
 
         resolve({
